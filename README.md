@@ -1,6 +1,6 @@
 # @chriscdn/dynamic-interval
 
-A `setInterval` alternative that recalculates delay after each run for backoff, reactive polling, and sequences. Includes functions to cancel and restart.
+A `setInterval` alternative that recalculates delay after each run. Includes functions to cancel and restart.
 
 ## Installing
 

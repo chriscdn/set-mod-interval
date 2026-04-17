@@ -1,5 +1,5 @@
 /**
- * Like `setInterval`, but allows the delay to be modulated dynamically after each iteration.
+ * A `setInterval` alternative that recalculates delay after each run.
  *
  * @param fn - The function to call on each iteration.
  * @param resolver - A callback to determine the delay (in ms) before the next iteration.
