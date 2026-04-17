@@ -1,6 +1,6 @@
 # @chriscdn/dynamic-interval
 
-A `setInterval` alternative that recalculates delay after each run. Includes functions to cancel and restart.
+A `setInterval` alternative that recalculates the delay after each run based on execution results. It provides fine-grained control over the loop's lifecycle, making it perfect for polling, exponential backoff, and state-dependent scheduling.
 
 ## Installing
 
@@ -22,36 +22,44 @@ yarn add @chriscdn/dynamic-interval
 import { setIntervalDynamic } from "@chriscdn/dynamic-interval";
 ```
 
-### Example with array mapping
+### Example: Finite Polling
 
-Using 0-based indexing to pull delays from a predefined sequence.
+Stop the interval automatically once a specific condition is met.
 
 ```ts
-const { cancel } = setIntervalDynamic(
-  () => console.log("Action performed"),
-  ({ runCount }) => {
-    const delays = [500, 1000, 2000, 5000];
-    return delays[runCount] ?? 10000;
+setIntervalDynamic(
+  async () => {
+    const response = await fetch("/api/job-status");
+    return response.json();
+  },
+  ({ results, cancel }) => {
+    if (results?.status === "completed") {
+      console.log("Job done!");
+      cancel(); // Stop the loop
+      return 0;
+    } else {
+      // Otherwise, check again in 2 seconds
+      return 2000;
+    }
   },
 );
 ```
 
-### Example with exponential backoff
+### Example: Exponential Backoff
 
-The delay only increases when an async operation fails. On success, `resetRunCount()` is called to reset the delay back to its starting value.
+Increase the delay when an async operation fails. On success, `resetRunCount()` is used to return to the base frequency.
 
 ```ts
 const { resetRunCount } = setIntervalDynamic(
   async () => fetch("/api/data"),
-  ({ runCount, error }) => {
+  ({ runCount, error, resetRunCount }) => {
     if (error) {
       // Exponential backoff: 2s, 4s, 8s... capped at 30s
       return Math.min(1000 * 2 ** runCount, 30_000);
     } else {
+      // Reset the runCount so the next error starts back at 2s
       resetRunCount();
-
-      // 1s delay on success
-      return 1000;
+      return 1000; // Poll every 1s on success
     }
   },
 );
@@ -61,25 +69,29 @@ const { resetRunCount } = setIntervalDynamic(
 
 ### `setIntervalDynamic(fn, resolver)`
 
-| Parameter  | Type                                           | Description                                 |
-| ---------- | ---------------------------------------------- | ------------------------------------------- |
-| `fn`       | `() => any`                                    | The function to execute. Can be async.      |
-| `resolver` | `({runCount, tick, results, error}) => number` | Callback to determine the next delay in ms. |
+| Parameter  | Type                                   | Description                                 |
+| ---------- | -------------------------------------- | ------------------------------------------- |
+| `fn`       | `() => any`                            | The function to execute. Can be async.      |
+| `resolver` | `(options: ResolverOptions) => number` | Callback to determine the next delay in ms. |
 
-#### Resolver Data Object
+#### Resolver Options Object
 
-The `resolver` callback receives:
+The `resolver` callback receives an object with the following properties:
 
-- `runCount`: (number) The 0-based index of the current cycle, resets when `resetRunCount()` is called.
-- `tick`: (number) The 0-based index of the current cycle, never resets.
-- `results`: (any) The return value of the latest `fn` call.
-- `error`: (any) The error caught if `fn` threw/rejected.
+- **`runCount`**: `number` — 0-based index of the current cycle. Resets to 0 when `resetRunCount()` or `restart()` is called.
+- **`tick`**: `number` — 0-based index of total cycles since instantiation. This never resets.
+- **`results`**: `ReturnType<fn> | undefined` — The value returned/resolved by the latest `fn` call.
+- **`error`**: `unknown` — The error caught if `fn` threw or rejected.
+- **`cancel`**: `() => void` — Call this to stop the interval immediately.
+- **`resetRunCount`**: `() => void` — Call this to reset the `runCount` to 0.
 
 ### Returns
 
-- `cancel()`: Stops the interval and clears any pending timeouts.
-- `restart()`: Clears the interval, resets the counter, and starts immediately. Does not modify `tick`.
-- `resetRunCount()`: Resets the `runCount` counter to 0.
+The function returns a controller object to manage the interval from the outside:
+
+- **`cancel()`**: Stops the interval immediately and clears any pending timeouts.
+- **`restart(delay?: number)`**: Stops the current interval, resets the `runCount`, and schedules a new session. Defaults to an immediate start (`0`ms).
+- **`resetRunCount()`**: Resets the `runCount` counter.
 
 ## License
 

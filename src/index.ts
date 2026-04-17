@@ -1,33 +1,60 @@
 /**
- * A `setInterval` alternative that recalculates delay after each run.
+ * A `setInterval` alternative that recalculates the delay after each execution
+ * and provides lifecycle controls directly within the iteration logic.
  *
- * @param fn - The function to call on each iteration.
- * @param resolver - A callback to determine the delay (in ms) before the next iteration.
- * Receives the current 0-based iteration index and the results of `fn`.
- * @returns Controls to manage the interval: `cancel`, `reset`, and `restart`.
+ * This utility is ideal for polling, exponential backoff, or tasks where the
+ * next interval depends on the outcome of the current execution.
+ *
+ * @param fn - The asynchronous or synchronous function to execute on each iteration.
+ * @param resolver - A callback triggered after `fn` settles. It determines the
+ * delay (in ms) before the next iteration starts and provides controls to
+ * manipulate the loop state.
+ * * @returns An object containing:
+ * - `cancel`: Stops the execution loop and clears pending timeouts.
+ * - `restart`: Resets the session, clears counts, and starts the loop again.
+ * - `resetRunCount`: Sets the `runCount` back to -1 (the next iteration will be 0).
  */
 const setIntervalDynamic = <T extends (...args: any[]) => any>(
   fn: T,
   resolver: (options: {
-    /** The 0-based index of the current iteration. */
+    /** The 0-based index of iterations since the last reset or restart. */
     runCount: number;
-    /** The 0-based index of the overall iteration. */
+    /** The 0-based index of total iterations since the initial call. */
     tick: number;
     /** The resolved value of the `fn` call for this iteration. */
     results: ReturnType<T> | undefined;
-    /** The error caught if `fn` rejected/threw. */
+    /** The error caught if `fn` rejected or threw. */
     error: unknown;
+    /** * Resets the `runCount` to -1. Useful for logic that relies on
+     * incremental backoff or retry limits.
+     */
+    resetRunCount: () => void;
+    /** * Immediately terminates the loop. No further timeouts will be
+     * scheduled after this is called.
+     */
+    cancel: () => void;
   }) => number,
 ) => {
+  /** Tracks iterations for the current "session"; reset by `resetRunCount`. */
   let runCount = -1;
+  /** Tracks lifetime iterations of the instance; never reset. */
   let tick = -1;
-  let cancelled = false;
+
+  /** Reference to the active `setTimeout` to allow for cleanup. */
   let timeout: ReturnType<typeof setTimeout> | undefined = undefined;
 
-  const funky = async () => {
-    if (cancelled) {
-      // do nothing
-    } else {
+  /** * Incremented on every restart/cancel to invalidate previous
+   * asynchronous execution chains (race condition protection).
+   */
+  let currentSessionId = 0;
+
+  /**
+   * The core execution wrapper that handles the function call,
+   * error catching, and scheduling the next iteration.
+   */
+  const funky = async (sessionId: number) => {
+    // Prevent execution if the session was invalidated (cancelled or restarted)
+    if (sessionId === currentSessionId) {
       let results: ReturnType<T> | undefined = undefined;
       let error: unknown;
 
@@ -37,47 +64,55 @@ const setIntervalDynamic = <T extends (...args: any[]) => any>(
         error = e;
       }
 
-      // iteration is 0 on the first run, 1 on the second, etc.
+      // Increment counters after fn() completes
       runCount++;
       tick++;
-      const interval = resolver({ results, runCount, error, tick });
 
-      if (cancelled) {
-        // do nothing
-      } else {
-        timeout = setTimeout(funky, interval);
+      /** Calculate the delay for the next run based on current state. */
+      const interval = resolver({
+        results,
+        runCount,
+        error,
+        tick,
+        resetRunCount,
+        cancel,
+      });
+
+      // Final check: ensure the session is still valid before scheduling the next tick
+      if (sessionId === currentSessionId) {
+        timeout = setTimeout(() => funky(sessionId), interval);
       }
     }
   };
 
-  /** Resets the runCount counter to 0 without stopping the current cycle. */
-  const resetRunCount = () => {
-    runCount = -1;
-  };
-
-  /** Stops the interval immediately and clears any pending timeout. */
+  /** * Stops the interval immediately, invalidates the current session,
+   * and clears any pending timeout.
+   */
   const cancel = () => {
-    resetRunCount();
-    cancelled = true;
+    currentSessionId++;
     clearTimeout(timeout);
   };
 
   /**
-   * Resets the counter and restarts the execution loop. This will execute the
-   * callback (almost) immediately. Useful for manual retries after a manual
-   * cancellation.
+   * Fully resets the interval state (session and runCount) and initiates
+   * a fresh execution loop after an optional delay.
+   * * @param delay - Time to wait (in ms) before the first execution of the new session.
    */
-  const restart = () => {
-    cancel(); // Ensures we don't have multiple loops running
-    cancelled = false;
-    funky();
+  const restart = (delay: number = 0) => {
+    cancel();
+    resetRunCount();
+    timeout = setTimeout(() => funky(currentSessionId), delay);
   };
 
-  // get the ball rolling
-  resetRunCount();
-  funky();
+  /** Resets the runCount to -1 so the next iteration starts at 0. */
+  const resetRunCount = () => {
+    runCount = -1;
+  };
 
-  return { restart, resetRunCount, cancel };
+  // Automatic initial kick-off
+  restart();
+
+  return { restart, cancel, resetRunCount };
 };
 
 export { setIntervalDynamic };
