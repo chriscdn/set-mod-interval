@@ -1,18 +1,18 @@
 # @chriscdn/dynamic-interval
 
-A `setInterval` alternative that recalculates the delay after each run based on execution results. It provides fine-grained control over the loop's lifecycle, making it perfect for polling, exponential backoff, and state-dependent scheduling.
+A `setInterval` alternative that recalculates the delay after each run based on execution results. It provides fine-grained control over the lifecycle, making it useful for polling, exponential backoff, and state-dependent scheduling.
 
 ## Installing
 
 Using npm:
 
-```bash
+```sh
 npm install @chriscdn/dynamic-interval
 ```
 
 Using yarn:
 
-```bash
+```sh
 yarn add @chriscdn/dynamic-interval
 ```
 
@@ -67,23 +67,27 @@ const { resetRunCount } = setIntervalDynamic(
 
 ## API
 
-### `setIntervalDynamic(fn, resolver)`
+### `setIntervalDynamic(fn, callback, initialDelay)`
 
-| Parameter  | Type                                   | Description                                 |
-| ---------- | -------------------------------------- | ------------------------------------------- |
-| `fn`       | `() => any`                            | The function to execute. Can be async.      |
-| `resolver` | `(options: ResolverOptions) => number` | Callback to determine the next delay in ms. |
+| Parameter      | Type                                   | Description                                          |
+| -------------- | -------------------------------------- | ---------------------------------------------------- |
+| `fn`           | `() => any`                            | The function to execute. Can be async.               |
+| `callback`     | `(options: callbackOptions) => number` | Callback to determine the next delay in ms.          |
+| `initialDelay` | `number`                               | Delay in ms before the first execution. Default `0`. |
 
-#### Resolver Options Object
+#### callback Options Object
 
-The `resolver` callback receives an object with the following properties:
+The `callback` function receives an object with the following properties:
 
 - **`runCount`**: `number` — 0-based index of the current cycle. Resets to 0 when `resetRunCount()` or `restart()` is called.
 - **`tick`**: `number` — 0-based index of total cycles since instantiation. This never resets.
 - **`results`**: `ReturnType<fn> | undefined` — The value returned/resolved by the latest `fn` call.
+- **`previousResults`**: `ReturnType<fn> | undefined` — The value returned/resolved by the previous `fn` call. `undefined` on the first iteration or after a `restart()`.
 - **`error`**: `unknown` — The error caught if `fn` threw or rejected.
 - **`cancel`**: `() => void` — Call this to stop the interval immediately.
 - **`resetRunCount`**: `() => void` — Call this to reset the `runCount` to 0.
+
+The callback must return a `number` representing the delay in milliseconds before the next `fn` execution. Non-finite values are treated as `0`.
 
 ### Returns
 

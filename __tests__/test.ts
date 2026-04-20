@@ -3,14 +3,14 @@ import { setIntervalDynamic } from "../src";
 let lastD = Date.now();
 
 const { cancel, restart } = setIntervalDynamic(
-  () => {
+  async () => {
     const now = Date.now();
     const z = now - lastD;
     lastD = now;
-
-    console.log(`hello : ${z}`);
+    return 777;
+    // console.log(`hello : ${z}`);
   },
-  ({ runCount }) => {
+  ({ runCount, results }) => {
     console.log(`----- runCount: ${runCount} `);
     const delays = [1000, 1000, 5_000, 10_000];
     const delay = delays[runCount] ?? 20_000;

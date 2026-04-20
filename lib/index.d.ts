@@ -6,23 +6,25 @@
  * next interval depends on the outcome of the current execution.
  *
  * @param fn - The asynchronous or synchronous function to execute on each iteration.
- * @param nextInterval - A callback triggered after `fn` settles. It determines the
+ * @param callback - A callback triggered after `fn` settles. It determines the
  * delay (in ms) before the next iteration starts and provides controls to
- * manipulate the loop state.
+ * manipulate the state.
+ * @param {number} [initialDelay] - How many milliseconds to start before the first call. Default is 0.
  *
  * @returns An object containing:
  * - `cancel`: Stops the execution loop and clears pending timeouts.
  * - `restart`: Resets the session, clears counts, and starts the loop again.
  * - `resetRunCount`: Sets the `runCount` back to -1 (the next iteration will be 0).
  */
-declare const setIntervalDynamic: <T extends (...args: any[]) => any>(fn: T, nextInterval: (context: {
+declare const setIntervalDynamic: <T extends (...args: any[]) => any>(fn: T, callback: (context: {
     runCount: number;
     tick: number;
     results: Awaited<ReturnType<T>> | undefined;
+    previousResults: Awaited<ReturnType<T>> | undefined;
     error: unknown;
     resetRunCount: () => void;
     cancel: () => void;
-}) => number) => {
+}) => number, initialDelay?: number) => {
     restart: (delay?: number) => void;
     cancel: () => void;
     resetRunCount: () => void;

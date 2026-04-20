@@ -6,9 +6,10 @@
  * next interval depends on the outcome of the current execution.
  *
  * @param fn - The asynchronous or synchronous function to execute on each iteration.
- * @param nextInterval - A callback triggered after `fn` settles. It determines the
+ * @param callback - A callback triggered after `fn` settles. It determines the
  * delay (in ms) before the next iteration starts and provides controls to
- * manipulate the loop state.
+ * manipulate the state.
+ * @param {number} [initialDelay] - How many milliseconds to start before the first call. Default is 0.
  *
  * @returns An object containing:
  * - `cancel`: Stops the execution loop and clears pending timeouts.
@@ -17,27 +18,31 @@
  */
 const setIntervalDynamic = <T extends (...args: any[]) => any>(
   fn: T,
-  nextInterval: (context: {
+  callback: (context: {
     // The 0-based index of iterations since the last reset or restart.
     runCount: number;
 
-    // The 0-based index of total iterations since the initial call.
+    // The 0-based index of total iterations since the initial call, which is never reset.
     tick: number;
 
     // The resolved value of the `fn` call for this iteration.
     results: Awaited<ReturnType<T>> | undefined;
 
-    // The error caught if `fn` rejected or threw.
+    // The results from the previous iteration. Undefined on first call.
+    previousResults: Awaited<ReturnType<T>> | undefined;
+
+    // The error if `fn` rejects or throws.
     error: unknown;
 
-    // Resets the `runCount` to -1. Useful for logic that relies on incremental
+    // Resets the `runCount`. Useful for logic that relies on incremental
     // backoff or retry limits.
     resetRunCount: () => void;
 
-    // Immediately terminate the loop. No further timeouts will be scheduled
-    // after this is called.
+    // Terminate the loop. No further timeouts will be scheduled
+    // after this is called. Can be restarted with `restart()`.
     cancel: () => void;
   }) => number,
+  initialDelay = 0,
 ) => {
   // Tracks iterations for the current "session"; reset by `resetRunCount`.
   let runCount = -1;
@@ -52,6 +57,8 @@ const setIntervalDynamic = <T extends (...args: any[]) => any>(
   // execution chains (race condition protection).
   let currentSessionId = 0;
 
+  let previousResults: Awaited<ReturnType<T>> | undefined = undefined;
+
   // The core execution wrapper that handles the function call, error catching,
   // and scheduling the next iteration.
   const _runIteration = async (sessionId: number) => {
@@ -64,25 +71,30 @@ const setIntervalDynamic = <T extends (...args: any[]) => any>(
         results = await fn();
       } catch (e) {
         error = e;
-      }
-
-      // Handles the case of `cancel` being called during the `await fn()` call.
-      if (sessionId === currentSessionId) {
-        // Increment counters after fn() completes
+      } finally {
         runCount++;
         tick++;
+      }
+
+      // Handles the case of `cancel` being called during or in the `await fn()`
+      // call.
+      if (sessionId === currentSessionId) {
+        // Increment counters after fn() completes
 
         // Calculate the delay for the next run based on current state.
-        const rawInterval = nextInterval({
+        const rawInterval = callback({
           results,
           runCount,
           error,
           tick,
           resetRunCount,
           cancel,
+          previousResults,
         });
 
-        // Handles the case of `cancel` being called during the `nextInterval()` call.
+        previousResults = results;
+
+        // Handles the case of `cancel` being called during the `callback()` call.
         if (sessionId === currentSessionId) {
           const interval = Number.isFinite(rawInterval)
             ? Math.max(0, rawInterval)
@@ -100,14 +112,15 @@ const setIntervalDynamic = <T extends (...args: any[]) => any>(
     currentSessionId++;
     clearTimeout(timeout);
     timeout = undefined;
+    previousResults = undefined;
   };
 
   /**
    * Fully resets the interval state (session and runCount) and initiates a
    * fresh execution loop after an optional delay.
    *
-   * @param delay - Time to wait (in ms) before the first execution of the new
-   * session.
+   * @param {number} delay - Time to wait (in ms) before the first execution of
+   * the new session.
    */
   const restart = (delay: number = 0) => {
     cancel();
@@ -120,7 +133,7 @@ const setIntervalDynamic = <T extends (...args: any[]) => any>(
     runCount = -1;
   };
 
-  restart();
+  restart(initialDelay);
 
   return { restart, cancel, resetRunCount };
 };
